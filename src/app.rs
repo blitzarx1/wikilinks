@@ -29,6 +29,9 @@ use crate::{
 };
 
 const SIMULATION_DT: f32 = 0.035;
+const EDGE_WEIGHT: f32 = 0.5;
+const COOL_OFF: f32 = 0.5;
+const SCALE: f32 = 50.;
 
 pub struct App {
     root_article_url: String,
@@ -381,7 +384,7 @@ fn add_edge(
     end: NodeIndex,
 ) {
     egui_graphs::add_edge(g, start, end, &());
-    sim.get_graph_mut().add_edge(start, end, 1.);
+    sim.get_graph_mut().add_edge(start, end, EDGE_WEIGHT);
 }
 
 fn construct_simulation() -> Simulation<(), f32> {
@@ -390,7 +393,7 @@ fn construct_simulation() -> Simulation<(), f32> {
 
     // initialize simulation
     let mut params = SimulationParameters::default();
-    let force = fdg_sim::force::fruchterman_reingold_weighted(50., 0.25);
+    let force = fdg_sim::force::fruchterman_reingold_weighted(SCALE, COOL_OFF);
     params.set_force(force);
 
     Simulation::from_graph(force_graph, params)
@@ -431,7 +434,7 @@ fn update_simulation(g: &Graph<node::Node, (), Directed>, sim: &mut Simulation<(
     // restore looped edges
     let graph = sim.get_graph_mut();
     for (idx, _) in looped_nodes.iter() {
-        graph.add_edge(*idx, *idx, 0.5);
+        graph.add_edge(*idx, *idx, EDGE_WEIGHT);
     }
 }
 
