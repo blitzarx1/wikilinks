@@ -1,18 +1,20 @@
 use crossbeam::channel::{Receiver, Sender};
 use egui::Ui;
 use egui_graphs::{Change, Graph, SettingsInteraction, SettingsNavigation, SettingsStyle};
-use petgraph::EdgeType;
+use petgraph::Directed;
+
+use crate::node::Node;
 
 const EDGE_WEIGHT: f32 = 0.05;
 
-pub struct State<'a, N: Clone, E: Clone, Ty: EdgeType> {
+pub struct State<'a> {
     pub loading: bool,
-    pub g: &'a mut Graph<N, E, Ty>,
+    pub g: &'a mut Graph<Node, (), Directed>,
     pub sender: Sender<Change>,
     pub receiver: Receiver<Change>,
 }
 
-pub fn draw_view_graph<N: Clone, E: Clone, Ty: EdgeType>(ui: &mut Ui, state: State<N, E, Ty>) {
+pub fn draw_view_graph(ui: &mut Ui, state: State) {
     let mut w = egui_graphs::GraphView::new(state.g);
     match state.loading {
         true => {
@@ -31,6 +33,7 @@ pub fn draw_view_graph<N: Clone, E: Clone, Ty: EdgeType>(ui: &mut Ui, state: Sta
                     .with_zoom_and_pan_enabled(true),
             );
             w = w.with_styles(&SettingsStyle::default().with_edge_radius_weight(EDGE_WEIGHT));
+            w = w.with_changes(&state.sender)
         }
     }
     ui.add(&mut w);

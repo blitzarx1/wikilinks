@@ -9,6 +9,7 @@ pub struct Url {
     val: url::Url,
 }
 
+#[derive(Debug)]
 pub enum Type {
     Article,
     File,

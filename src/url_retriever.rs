@@ -1,9 +1,8 @@
 use crossbeam::channel::Sender;
-use log::{debug, error, info};
+use log::{error, info};
 use reqwest::Error;
 use scraper::{Html, Selector};
 use tokio::task::JoinHandle;
-use url::quirks::protocol;
 
 use crate::url::Url;
 

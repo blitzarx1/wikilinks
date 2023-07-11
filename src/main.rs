@@ -1,5 +1,5 @@
-use eframe::{run_native, App, CreationContext, Frame, NativeOptions};
-use egui::{CentralPanel, Context};
+use eframe::{run_native, CreationContext, Frame, NativeOptions};
+use egui::Context;
 
 const APP_NAME: &str = "Wiki Links";
 
@@ -10,11 +10,11 @@ mod url;
 mod url_retriever;
 mod views;
 
-pub struct WikiLinksApp {
+pub struct App {
     app: app::App,
 }
 
-impl WikiLinksApp {
+impl App {
     fn new(_: &CreationContext<'_>) -> Self {
         Self {
             app: app::App::new(),
@@ -22,7 +22,7 @@ impl WikiLinksApp {
     }
 }
 
-impl App for WikiLinksApp {
+impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _: &mut Frame) {
         self.app.update(ctx);
     }
@@ -36,7 +36,7 @@ async fn main() {
     run_native(
         APP_NAME,
         native_options,
-        Box::new(|cc| Box::new(WikiLinksApp::new(cc))),
+        Box::new(|cc| Box::new(App::new(cc))),
     )
     .unwrap();
 }
