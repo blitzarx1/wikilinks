@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use egui::{CentralPanel, SidePanel};
+use egui::{CentralPanel, SidePanel, Vec2};
 use egui::{Context, InputState, Stroke, Style, Ui};
-use egui_graphs::{add_edge, add_node_custom, Change, ChangeNode, Graph, Node};
+use egui_graphs::{add_node_custom, Change, ChangeNode, Edge, Graph, Node};
+use fdg_sim::glam::Vec3;
+use fdg_sim::{ForceGraph, ForceGraphHelper, Simulation, SimulationParameters};
 use log::error;
 use log::info;
 use petgraph::{
@@ -26,6 +28,8 @@ use crate::{
     url_retriever::UrlRetriever,
 };
 
+const SIMULATION_DT: f32 = 0.035;
+
 pub struct App {
     root_article_url: String,
     state: State,
@@ -35,6 +39,7 @@ pub struct App {
     active_tasks: HashMap<NodeIndex, (Receiver<Result<Url, Error>>, JoinHandle<()>)>,
 
     g: Graph<node::Node, (), Directed>,
+    sim: Simulation<(), f32>,
 
     selected_node: Option<NodeIndex>,
 
@@ -52,11 +57,13 @@ impl App {
         style.visuals.selection.bg_fill = COLOR_SUB_ACCENT;
 
         let (changes_sender, changes_receiver) = unbounded();
+        let sim = construct_simulation();
 
         App {
             style,
             changes_sender,
             changes_receiver,
+            sim,
 
             root_article_url: Default::default(),
             state: Default::default(),
@@ -73,6 +80,9 @@ impl App {
         self.handle_state();
         self.draw(ctx);
         self.handle_keys(ctx);
+
+        sync_graph_with_simulation(&mut self.g, &mut self.sim);
+        update_simulation(&self.g, &mut self.sim);
     }
 
     fn handle_state(&mut self) {
@@ -99,11 +109,9 @@ impl App {
                 Change::Node(change_node) => match change_node {
                     ChangeNode::Selected { id, old, new } => match new {
                         true => {
-                            info!("node {:?} selected", id);
                             self.selected_node = Some(id);
                         }
                         false => {
-                            info!("node {:?} deselected", id);
                             self.selected_node = None;
                         }
                     },
@@ -152,39 +160,17 @@ impl App {
 
                             match self.node_by_url.get(&url) {
                                 Some(idx) => {
-                                    add_edge(&mut self.g, *parent_idx, *idx, &());
+                                    add_edge(&mut self.g, &mut self.sim, *parent_idx, *idx);
                                 }
                                 None => {
-                                    let idx = add_node_custom(
+                                    let idx = add_node(
                                         &mut self.g,
+                                        &mut self.sim,
+                                        parent_loc,
                                         &node::Node::new(url.clone()),
-                                        |_, n| {
-                                            let mut rng = rand::thread_rng();
-
-                                            let color = match n.url().url_type() {
-                                                url::Type::Article => Some(COLOR_SUB_ACCENT),
-                                                url::Type::File => Some(COLOR_LEFT_LOW),
-                                                url::Type::Other => None,
-                                            };
-
-                                            let mut res = Node::new(
-                                                egui::Vec2 {
-                                                    x: parent_loc.x + rng.gen_range(-100.0..100.),
-                                                    y: parent_loc.y + rng.gen_range(-100.0..100.),
-                                                },
-                                                n.clone(),
-                                            )
-                                            .with_label(n.url().val().to_string());
-
-                                            if let Some(c) = color {
-                                                res = res.with_color(c);
-                                            }
-
-                                            res
-                                        },
                                     );
                                     self.node_by_url.insert(url, idx);
-                                    add_edge(&mut self.g, *parent_idx, idx, &());
+                                    add_edge(&mut self.g, &mut self.sim, *parent_idx, idx);
                                 }
                             };
                         }
@@ -306,21 +292,22 @@ impl App {
                     }
 
                     self.g = StableGraph::new();
+                    let mut rng = rand::thread_rng();
+                    let loc = egui::Vec2 {
+                        x: rng.gen_range(-100.0..100.),
+                        y: rng.gen_range(-100.0..100.),
+                    };
 
-                    let idx = add_node_custom(&mut self.g, &node::Node::new(u.clone()), |_, n| {
-                        let mut rng = rand::thread_rng();
-                        Node::new(
-                            egui::Vec2 {
-                                x: rng.gen_range(-100.0..100.),
-                                y: rng.gen_range(-100.0..100.),
-                            },
-                            n.clone(),
-                        )
-                        .with_label(n.url().val().to_string())
-                        .with_color(COLOR_ACCENT)
-                    });
+                    let idx: NodeIndex =
+                        add_node_custom(&mut self.g, &node::Node::new(u.clone()), |_, n| {
+                            Node::new(loc, n.clone())
+                                .with_label(n.url().val().to_string())
+                                .with_color(COLOR_ACCENT)
+                        });
 
                     self.node_by_url.insert(u.clone(), idx);
+
+                    add_node_to_sim(&mut self.sim, idx, loc);
 
                     self.create_new_task(idx, u);
 
@@ -350,4 +337,124 @@ impl App {
             g: &self.g,
         }
     }
+}
+
+fn add_node(
+    g: &mut Graph<node::Node, (), Directed>,
+    sim: &mut Simulation<(), f32>,
+    loc_center: Vec2,
+    n: &node::Node,
+) -> NodeIndex {
+    let mut rng = rand::thread_rng();
+    let loc = egui::Vec2 {
+        x: loc_center.x + rng.gen_range(-100.0..100.),
+        y: loc_center.y + rng.gen_range(-100.0..100.),
+    };
+
+    let color = match n.url().url_type() {
+        url::Type::Article => Some(COLOR_SUB_ACCENT),
+        url::Type::File => Some(COLOR_LEFT_LOW),
+        url::Type::Other => None,
+    };
+
+    let idx = add_node_custom(g, n, |_, n| {
+        let mut res = Node::new(loc, n.clone()).with_label(n.url().val().to_string());
+        if let Some(c) = color {
+            res = res.with_color(c);
+        }
+        res
+    });
+
+    add_node_to_sim(sim, idx, loc)
+}
+
+fn add_node_to_sim(sim: &mut Simulation<(), f32>, idx: NodeIndex, loc: Vec2) -> NodeIndex {
+    let mut sim_node = fdg_sim::Node::new(idx.index().to_string().as_str(), ());
+    sim_node.location = Vec3::new(loc.x, loc.y, 0.);
+    sim.get_graph_mut().add_node(sim_node)
+}
+
+fn add_edge(
+    g: &mut Graph<node::Node, (), Directed>,
+    sim: &mut Simulation<(), f32>,
+    start: NodeIndex,
+    end: NodeIndex,
+) {
+    egui_graphs::add_edge(g, start, end, &());
+    sim.get_graph_mut().add_edge(start, end, 1.);
+}
+
+fn construct_simulation() -> Simulation<(), f32> {
+    // create force graph
+    let mut force_graph = ForceGraph::default();
+
+    // initialize simulation
+    let mut params = SimulationParameters::default();
+    let force = fdg_sim::force::fruchterman_reingold_weighted(50., 0.25);
+    params.set_force(force);
+
+    Simulation::from_graph(force_graph, params)
+}
+
+fn update_simulation(g: &Graph<node::Node, (), Directed>, sim: &mut Simulation<(), f32>) {
+    // the following manipulations is a hack to avoid having looped edges in the simulation
+    // because they cause the simulation to blow up;
+    // this is the issue of the fdg_sim engine we use for the simulation
+    // https://github.com/grantshandy/fdg/issues/10
+    // * remove loop edges
+    // * update simulation
+    // * restore loop edges
+
+    // remove looped edges
+    let looped_nodes = {
+        let graph = sim.get_graph_mut();
+        let mut looped_nodes = vec![];
+        let mut looped_edges = vec![];
+        graph.edge_indices().for_each(|idx| {
+            let edge = graph.edge_endpoints(idx).unwrap();
+            let looped = edge.0 == edge.1;
+            if looped {
+                looped_nodes.push((edge.0, ()));
+                looped_edges.push(idx);
+            }
+        });
+
+        for idx in looped_edges {
+            graph.remove_edge(idx);
+        }
+
+        sim.update(SIMULATION_DT);
+
+        looped_nodes
+    };
+
+    // restore looped edges
+    let graph = sim.get_graph_mut();
+    for (idx, _) in looped_nodes.iter() {
+        graph.add_edge(*idx, *idx, 0.5);
+    }
+}
+
+/// Syncs the graph with the simulation.
+///
+/// Changes location of nodes in `g` according to the locations in `sim`. If node from `g` is dragged its location is prioritized
+/// over the location of the corresponding node from `sim` and this location is set to the node from the `sim`.
+fn sync_graph_with_simulation(
+    g: &mut Graph<node::Node, (), Directed>,
+    sim: &mut Simulation<(), f32>,
+) {
+    let g_indices = g.node_indices().collect::<Vec<_>>();
+    g_indices.iter().for_each(|g_n_idx| {
+        let g_n = g.node_weight_mut(*g_n_idx).unwrap();
+        let sim_n = sim.get_graph_mut().node_weight_mut(*g_n_idx).unwrap();
+
+        if g_n.dragged() {
+            let loc = g_n.location();
+            sim_n.location = Vec3::new(loc.x, loc.y, 0.);
+            return;
+        }
+
+        let loc = sim_n.location;
+        g_n.set_location(Vec2::new(loc.x, loc.y));
+    });
 }

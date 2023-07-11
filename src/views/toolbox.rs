@@ -23,21 +23,24 @@ pub fn draw_view_toolbox(ui: &mut Ui, state: &State) -> Option<Response> {
         ui.vertical_centered(|ui| {
             ui.add_space(state.spacing);
             ui.label(header_accent(HEADING));
+
             ui.add_space(state.spacing);
             ui.separator();
 
-            ui.add_space(state.spacing);
-            ui.label(match state.loading {
-                true => MSG_SCRAPPING,
-                false => "",
-            });
+            ui.label(format!("urls: {}", state.g.node_count()));
+            ui.label(format!("connections: {}", state.g.edge_count()));
 
-            if state.loading {
-                ui.centered_and_justified(|ui| ui.spinner());
-                return;
+            match state.loading {
+                true => {
+                    ui.add_space(state.spacing);
+                    ui.label(MSG_SCRAPPING);
+                    ui.centered_and_justified(|ui| ui.spinner());
+                }
+                false => {
+                    ui.add_space(state.spacing);
+                    resp = draw_selected_node(ui, state);
+                }
             }
-
-            resp = draw_selected_node(ui, state);
         })
     });
 
@@ -55,21 +58,23 @@ pub fn draw_selected_node(ui: &mut Ui, state: &State) -> Option<Response> {
         .unwrap();
 
     ui.label(format!("{:?}", node.url().url_type()));
-    ui.add(TextEdit::singleline(&mut node.url().val()).frame(false));
 
-    ui.horizontal(|ui| {
-        if ui.button("copy").clicked() {
-            todo!()
-        };
+    ui.add(
+        TextEdit::singleline(&mut node.url().val())
+            .cursor_at_end(true)
+            .frame(false),
+    );
 
-        if ui.button("open").clicked() {
-            open::that(node.url().val()).unwrap();
-        };
+    if ui.button("copy").clicked() {
+        todo!()
+    };
 
-        match node.url().url_type() {
-            crate::url::Type::Article => Some(ui.button("get links")),
-            _ => None,
-        }
-    })
-    .inner
+    if ui.button("open").clicked() {
+        open::that(node.url().val()).unwrap();
+    };
+
+    match node.url().url_type() {
+        crate::url::Type::Article => Some(ui.button("get links")),
+        _ => None,
+    }
 }
