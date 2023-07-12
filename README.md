@@ -12,3 +12,6 @@ cargo run --release
 RUST_LOG=<log_level> cargo r --release
 ``` 
 * `log_level`: trace, debug, info, warn, error
+
+## Gallery
+![Screenshot 2023-07-12 at 00 42 12](https://github.com/blitzarx1/wikilinks/assets/32969427/0f7ca00d-9af4-4b0a-9940-3cf625db68a1)
