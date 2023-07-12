@@ -60,7 +60,7 @@ pub fn draw_selected_node(ui: &mut Ui, state: &State) -> Option<Response> {
     ui.label(format!("{:?}", node.url().url_type()));
 
     ui.add(
-        TextEdit::singleline(&mut node.url().val())
+        TextEdit::singleline(&mut node.label())
             .cursor_at_end(true)
             .frame(false),
     );

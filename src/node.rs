@@ -13,4 +13,8 @@ impl Node {
     pub fn url(&self) -> &Url {
         &self.url
     }
+
+    pub fn label(&self) -> String {
+        self.url.val_for_type()
+    }
 }

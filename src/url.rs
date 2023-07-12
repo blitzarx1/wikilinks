@@ -31,6 +31,19 @@ impl Url {
         self.val.as_str()
     }
 
+    pub fn val_for_type(&self) -> String {
+        match self.url_type() {
+            Type::Article | Type::File => String::from(
+                urlencoding::decode(self.val.path())
+                    .unwrap()
+                    .split('/')
+                    .last()
+                    .unwrap(),
+            ),
+            Type::Other => self.val().to_string(),
+        }
+    }
+
     pub fn url_type(&self) -> Type {
         if self.is_wiki_article() {
             Type::Article
@@ -46,7 +59,12 @@ impl Url {
             static ref RE: Regex =
                 Regex::new(r"https://[a-z]{2}\.wikipedia\.org/wiki/([^/.]+)$").unwrap();
         }
-        RE.is_match(self.val())
+
+        if RE.is_match(self.val()) {
+            return !self.val.path().contains(':');
+        };
+
+        false
     }
 
     fn is_file(&self) -> bool {

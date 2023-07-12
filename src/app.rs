@@ -29,7 +29,7 @@ use crate::{
 };
 
 const SIMULATION_DT: f32 = 0.035;
-const EDGE_WEIGHT: f32 = 0.5;
+const EDGE_WEIGHT: f32 = 0.1;
 const COOL_OFF: f32 = 0.5;
 const SCALE: f32 = 50.;
 
@@ -107,20 +107,16 @@ impl App {
     }
 
     fn handle_state_graph(&mut self) {
-        if let Ok(change) = self.changes_receiver.try_recv() {
-            match change {
-                Change::Node(change_node) => match change_node {
-                    ChangeNode::Selected { id, old, new } => match new {
-                        true => {
-                            self.selected_node = Some(id);
-                        }
-                        false => {
-                            self.selected_node = None;
-                        }
-                    },
-                    _ => (),
-                },
-                _ => (),
+        if let Ok(Change::Node(ChangeNode::Selected { id, old, new })) =
+            self.changes_receiver.try_recv()
+        {
+            match new {
+                true => {
+                    self.selected_node = Some(id);
+                }
+                false => {
+                    self.selected_node = None;
+                }
             }
         }
     }
@@ -304,7 +300,7 @@ impl App {
                     let idx: NodeIndex =
                         add_node_custom(&mut self.g, &node::Node::new(u.clone()), |_, n| {
                             Node::new(loc, n.clone())
-                                .with_label(n.url().val().to_string())
+                                .with_label(n.label())
                                 .with_color(COLOR_ACCENT)
                         });
 
@@ -361,7 +357,7 @@ fn add_node(
     };
 
     let idx = add_node_custom(g, n, |_, n| {
-        let mut res = Node::new(loc, n.clone()).with_label(n.url().val().to_string());
+        let mut res = Node::new(loc, n.clone()).with_label(n.label());
         if let Some(c) = color {
             res = res.with_color(c);
         }

@@ -24,8 +24,7 @@ pub fn draw_view_graph(ui: &mut Ui, state: State) {
             w = w.with_interactions(
                 &SettingsInteraction::default()
                     .with_selection_enabled(true)
-                    .with_dragging_enabled(true)
-                    .with_selection_depth(i32::MAX),
+                    .with_dragging_enabled(true),
             );
             w = w.with_navigations(
                 &SettingsNavigation::default()
