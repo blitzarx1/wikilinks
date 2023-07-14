@@ -50,14 +50,15 @@ pub fn draw_view_toolbox(ui: &mut Ui, state: &State) -> Option<Response> {
 pub fn draw_selected_node(ui: &mut Ui, state: &State) -> Option<Response> {
     state.selected_node?;
 
-    let node = state
-        .g
-        .node_weight(state.selected_node.unwrap())
-        .unwrap()
-        .data()
-        .unwrap();
+    let selected_idx = state.selected_node.unwrap();
 
-    ui.label(format!("{:?}", node.url().url_type()));
+    let node = state.g.node_weight(selected_idx).unwrap().data().unwrap();
+
+    ui.label(format!(
+        "{}: {:?}",
+        selected_idx.index(),
+        node.url().url_type()
+    ));
 
     ui.add(
         TextEdit::singleline(&mut node.label())

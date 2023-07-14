@@ -17,7 +17,7 @@ pub struct App {
 impl App {
     fn new(_: &CreationContext<'_>) -> Self {
         Self {
-            app: app::App::new(),
+            app: app::App::default(),
         }
     }
 }

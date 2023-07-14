@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, LinkedList};
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use egui::{CentralPanel, SidePanel, Vec2};
@@ -33,13 +33,15 @@ const EDGE_WEIGHT: f32 = 0.1;
 const COOL_OFF: f32 = 0.5;
 const SCALE: f32 = 50.;
 
+type ActiveTasks = HashMap<NodeIndex, (Receiver<Result<Url, Error>>, JoinHandle<()>)>;
+
 pub struct App {
     root_article_url: String,
     state: State,
 
     style: Style,
 
-    active_tasks: HashMap<NodeIndex, (Receiver<Result<Url, Error>>, JoinHandle<()>)>,
+    active_tasks: ActiveTasks,
 
     g: Graph<node::Node, (), Directed>,
     sim: Simulation<(), f32>,
@@ -52,8 +54,8 @@ pub struct App {
     node_by_url: HashMap<Url, NodeIndex>,
 }
 
-impl App {
-    pub fn new() -> Self {
+impl Default for App {
+    fn default() -> Self {
         let mut style = Style::default();
         style.visuals.text_cursor_width = CURSOR_WIDTH;
         style.visuals.selection.stroke = Stroke::new(1., COLOR_ACCENT);
@@ -76,7 +78,9 @@ impl App {
             node_by_url: Default::default(),
         }
     }
+}
 
+impl App {
     pub fn update(&mut self, ctx: &Context) {
         ctx.set_style(self.style.clone());
 
@@ -206,11 +210,130 @@ impl App {
     fn handle_keys(&mut self, ctx: &Context) {
         ctx.input(|i| match self.state {
             State::Input => self.handle_keys_input(i),
-            State::InputError
-            | State::GraphAndLoading
-            | State::GraphAndLoadingError
-            | State::Graph => (),
+            State::InputError | State::GraphAndLoading | State::GraphAndLoadingError => (),
+            State::Graph => self.handle_keys_graph(i),
         });
+    }
+
+    fn select_node(&mut self, idx: NodeIndex) {
+        if let Some(selected) = self.selected_node {
+            let n = self.g.node_weight_mut(selected).unwrap();
+            n.set_selected(false);
+        }
+
+        let n = self.g.node_weight_mut(idx).unwrap();
+        n.set_selected(true);
+
+        self.selected_node = Some(idx);
+    }
+
+    fn select_next_article(&mut self) {
+        if let Some(selected) = self.selected_node {
+            let mut next_val = selected.index() as i32 + 1;
+            let mut next_idx: NodeIndex<u32> = NodeIndex::new(next_val as usize);
+            loop {
+                if next_val > self.g.node_count() as i32 - 1 {
+                    next_val = selected.index() as i32;
+                    next_idx = NodeIndex::new(next_val as usize);
+                    break;
+                }
+
+                if self
+                    .g
+                    .node_weight(next_idx)
+                    .unwrap()
+                    .data()
+                    .unwrap()
+                    .url()
+                    .url_type()
+                    == url::Type::Article
+                {
+                    break;
+                }
+
+                next_val += 1;
+                next_idx = NodeIndex::new(next_val as usize);
+            }
+
+            self.select_node(next_idx);
+            return;
+        }
+
+        self.select_first_article();
+    }
+
+    fn select_first_article(&mut self) {
+        let mut idx = NodeIndex::new(0);
+        loop {
+            if self
+                .g
+                .node_weight(idx)
+                .unwrap()
+                .data()
+                .unwrap()
+                .url()
+                .url_type()
+                == url::Type::Article
+            {
+                break;
+            }
+
+            idx = NodeIndex::new(idx.index() + 1);
+        }
+
+        self.select_node(idx);
+    }
+
+    fn select_prev_article(&mut self) {
+        if let Some(selected) = self.selected_node {
+            let mut prev_val = selected.index() as i32 - 1;
+            let mut prev_idx: NodeIndex<u32> = NodeIndex::new(prev_val as usize);
+            loop {
+                if prev_val < 0 {
+                    prev_val = selected.index() as i32;
+                    prev_idx = NodeIndex::new(prev_val as usize);
+                    break;
+                }
+
+                if self
+                    .g
+                    .node_weight(prev_idx)
+                    .unwrap()
+                    .data()
+                    .unwrap()
+                    .url()
+                    .url_type()
+                    == url::Type::Article
+                {
+                    break;
+                }
+
+                prev_val -= 1;
+                prev_idx = NodeIndex::new(prev_val as usize);
+            }
+
+            self.select_node(prev_idx);
+            return;
+        }
+
+        self.select_first_article();
+    }
+
+    fn handle_keys_graph(&mut self, i: &InputState) {
+        if i.key_pressed(egui::Key::ArrowLeft) {
+            self.select_prev_article();
+        }
+        if i.key_pressed(egui::Key::ArrowRight) {
+            self.select_next_article();
+        }
+        if i.key_pressed(egui::Key::Enter) {
+            if let Some(idx) = self.selected_node {
+                let n = self.g.node_weight(idx).unwrap().data().unwrap();
+
+                self.create_new_task(idx, n.url().clone());
+                self.state = State::GraphAndLoading;
+            }
+        }
     }
 
     fn draw_input_error(&mut self, ctx: &Context) {
