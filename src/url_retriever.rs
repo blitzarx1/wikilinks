@@ -31,7 +31,7 @@ impl UrlRetriever {
                     }
                 }
                 Err(err) => {
-                    self.results.send(Err(err));
+                    self.results.send(Err(err)).unwrap();
                 }
             }
         })

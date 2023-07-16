@@ -131,7 +131,7 @@ impl App {
     }
 
     fn handle_state_graph(&mut self) {
-        if let Ok(Change::Node(ChangeNode::Selected { id, old, new })) =
+        if let Ok(Change::Node(ChangeNode::Selected { id, old: _, new })) =
             self.changes_receiver.try_recv()
         {
             // we don't need to handle deselect as our app just rewrites selection
@@ -246,7 +246,7 @@ impl App {
         let n = self.g.node_weight_mut(idx).unwrap();
         n.set_selected(true);
 
-        self.state_iteration.as_mut().unwrap().set_current(idx);
+        self.state_iteration.as_mut().unwrap().set_cursor(idx);
         self.selected_node = Some(idx);
     }
 
