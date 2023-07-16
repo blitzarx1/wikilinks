@@ -17,6 +17,7 @@ use rand::Rng;
 use reqwest::Error;
 use tokio::task::JoinHandle;
 
+use crate::iteration::StateIteration;
 use crate::views::graph::{self, draw_view_graph};
 use crate::views::input::draw_view_input;
 use crate::views::style::{COLOR_ACCENT, COLOR_LEFT_LOW, COLOR_SUB_ACCENT, CURSOR_WIDTH};
@@ -48,6 +49,8 @@ pub struct App {
 
     selected_node: Option<NodeIndex>,
 
+    state_iteration: Option<StateIteration>,
+
     changes_sender: Sender<Change>,
     changes_receiver: Receiver<Change>,
 
@@ -76,6 +79,7 @@ impl Default for App {
             active_tasks: Default::default(),
             selected_node: Default::default(),
             node_by_url: Default::default(),
+            state_iteration: Default::default(),
         }
     }
 }
@@ -95,6 +99,7 @@ impl App {
     fn handle_state(&mut self) {
         match self.state {
             State::GraphAndLoading => self.handle_state_graph_and_loading(),
+            State::GraphLoaded => self.handle_state_graph_loaded(),
             State::Graph => self.handle_state_graph(),
             State::GraphAndLoadingError | State::Input | State::InputError => (),
         }
@@ -105,23 +110,37 @@ impl App {
             State::Input => self.draw_input(ctx),
             State::InputError => self.draw_input_error(ctx),
             State::GraphAndLoading => self.draw_graph_and_loading(ctx),
-            State::Graph => self.draw_graph(ctx),
+            State::Graph | State::GraphLoaded => self.draw_graph(ctx),
             State::GraphAndLoadingError => todo!(),
         }
+    }
+
+    fn handle_state_graph_loaded(&mut self) {
+        if self.state_iteration.is_none() {
+            let first_root = NodeIndex::new(0);
+            self.state_iteration = Some(StateIteration::new(first_root, &self.g));
+            self.select_node(first_root)
+        } else {
+            self.state_iteration
+                .as_mut()
+                .unwrap()
+                .add(self.selected_node.unwrap(), &self.g);
+        }
+
+        self.state = next(&self.state, Fork::Success)
     }
 
     fn handle_state_graph(&mut self) {
         if let Ok(Change::Node(ChangeNode::Selected { id, old, new })) =
             self.changes_receiver.try_recv()
         {
-            match new {
-                true => {
-                    self.selected_node = Some(id);
-                }
-                false => {
-                    self.selected_node = None;
-                }
+            // we don't need to handle deselect as our app just rewrites selection
+            // when needed
+            if !new {
+                return;
             }
+
+            self.select_node(id);
         }
     }
 
@@ -210,7 +229,10 @@ impl App {
     fn handle_keys(&mut self, ctx: &Context) {
         ctx.input(|i| match self.state {
             State::Input => self.handle_keys_input(i),
-            State::InputError | State::GraphAndLoading | State::GraphAndLoadingError => (),
+            State::InputError
+            | State::GraphAndLoading
+            | State::GraphAndLoadingError
+            | State::GraphLoaded => (),
             State::Graph => self.handle_keys_graph(i),
         });
     }
@@ -224,50 +246,17 @@ impl App {
         let n = self.g.node_weight_mut(idx).unwrap();
         n.set_selected(true);
 
+        self.state_iteration.as_mut().unwrap().set_current(idx);
         self.selected_node = Some(idx);
     }
 
     fn select_next_article(&mut self) {
-        if let Some(selected) = self.selected_node {
-            let mut next_val = selected.index() as i32 + 1;
-            let mut next_idx: NodeIndex<u32> = NodeIndex::new(next_val as usize);
-            loop {
-                if next_val > self.g.node_count() as i32 - 1 {
-                    next_val = selected.index() as i32;
-                    next_idx = NodeIndex::new(next_val as usize);
-                    break;
-                }
-
-                if self
-                    .g
-                    .node_weight(next_idx)
-                    .unwrap()
-                    .data()
-                    .unwrap()
-                    .url()
-                    .url_type()
-                    == url::Type::Article
-                {
-                    break;
-                }
-
-                next_val += 1;
-                next_idx = NodeIndex::new(next_val as usize);
-            }
-
-            self.select_node(next_idx);
-            return;
-        }
-
-        self.select_first_article();
-    }
-
-    fn select_first_article(&mut self) {
-        let mut idx = NodeIndex::new(0);
+        let state_iteration = self.state_iteration.as_mut().unwrap();
+        let mut next = state_iteration.next();
         loop {
             if self
                 .g
-                .node_weight(idx)
+                .node_weight(next)
                 .unwrap()
                 .data()
                 .unwrap()
@@ -278,45 +267,33 @@ impl App {
                 break;
             }
 
-            idx = NodeIndex::new(idx.index() + 1);
+            next = state_iteration.next();
         }
 
-        self.select_node(idx);
+        self.select_node(next);
     }
 
     fn select_prev_article(&mut self) {
-        if let Some(selected) = self.selected_node {
-            let mut prev_val = selected.index() as i32 - 1;
-            let mut prev_idx: NodeIndex<u32> = NodeIndex::new(prev_val as usize);
-            loop {
-                if prev_val < 0 {
-                    prev_val = selected.index() as i32;
-                    prev_idx = NodeIndex::new(prev_val as usize);
-                    break;
-                }
-
-                if self
-                    .g
-                    .node_weight(prev_idx)
-                    .unwrap()
-                    .data()
-                    .unwrap()
-                    .url()
-                    .url_type()
-                    == url::Type::Article
-                {
-                    break;
-                }
-
-                prev_val -= 1;
-                prev_idx = NodeIndex::new(prev_val as usize);
+        let state_iteration = self.state_iteration.as_mut().unwrap();
+        let mut prev = state_iteration.prev();
+        loop {
+            if self
+                .g
+                .node_weight(prev)
+                .unwrap()
+                .data()
+                .unwrap()
+                .url()
+                .url_type()
+                == url::Type::Article
+            {
+                break;
             }
 
-            self.select_node(prev_idx);
-            return;
+            prev = state_iteration.prev();
         }
 
-        self.select_first_article();
+        self.select_node(prev);
     }
 
     fn handle_keys_graph(&mut self, i: &InputState) {

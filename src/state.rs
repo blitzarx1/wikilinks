@@ -12,6 +12,9 @@ pub enum State {
     GraphAndLoading,
     /// Error while loading links with some links loaded
     GraphAndLoadingError,
+    /// All links were loaded
+    GraphLoaded,
+
     /// All links were loaded now we have only the graph
     Graph,
 }
@@ -33,8 +36,12 @@ pub fn next(state: &State, fork: Fork) -> State {
             Fork::Failure => State::InputError,
         },
         State::GraphAndLoading => match fork {
-            Fork::Success => State::Graph,
+            Fork::Success => State::GraphLoaded,
             Fork::Failure => State::GraphAndLoadingError,
+        },
+        State::GraphLoaded => match fork {
+            Fork::Success => State::Graph,
+            Fork::Failure => State::Graph,
         },
         State::GraphAndLoadingError => match fork {
             Fork::Success => State::Graph,
