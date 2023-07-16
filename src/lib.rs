@@ -4,6 +4,6 @@ mod state;
 mod url;
 mod url_retriever;
 mod views;
-mod iteration;
+mod cursor;
 
 pub use app::App;

@@ -1,23 +1,22 @@
-use std::collections::{HashMap, LinkedList};
+use std::collections::HashMap;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use egui::{CentralPanel, SidePanel, Vec2};
 use egui::{Context, InputState, Stroke, Style, Ui};
-use egui_graphs::{add_node_custom, Change, ChangeNode, Edge, Graph, Node};
+use egui_graphs::{add_node_custom, Change, ChangeNode, Graph, Node};
 use fdg_sim::glam::Vec3;
-use fdg_sim::{ForceGraph, ForceGraphHelper, Simulation, SimulationParameters};
+use fdg_sim::{ForceGraph, Simulation, SimulationParameters};
 use log::error;
 use log::info;
 use petgraph::{
     stable_graph::{NodeIndex, StableGraph},
     Directed,
 };
-use rand::seq::IteratorRandom;
 use rand::Rng;
 use reqwest::Error;
 use tokio::task::JoinHandle;
 
-use crate::iteration::StateIteration;
+use crate::cursor::Cursor;
 use crate::views::graph::{self, draw_view_graph};
 use crate::views::input::draw_view_input;
 use crate::views::style::{COLOR_ACCENT, COLOR_LEFT_LOW, COLOR_SUB_ACCENT, CURSOR_WIDTH};
@@ -49,7 +48,7 @@ pub struct App {
 
     selected_node: Option<NodeIndex>,
 
-    state_iteration: Option<StateIteration>,
+    cursor: Option<Cursor>,
 
     changes_sender: Sender<Change>,
     changes_receiver: Receiver<Change>,
@@ -79,7 +78,7 @@ impl Default for App {
             active_tasks: Default::default(),
             selected_node: Default::default(),
             node_by_url: Default::default(),
-            state_iteration: Default::default(),
+            cursor: Default::default(),
         }
     }
 }
@@ -93,7 +92,7 @@ impl App {
         self.handle_keys(ctx);
 
         sync_graph_with_simulation(&mut self.g, &mut self.sim);
-        update_simulation(&self.g, &mut self.sim);
+        update_simulation(&mut self.sim);
     }
 
     fn handle_state(&mut self) {
@@ -116,12 +115,12 @@ impl App {
     }
 
     fn handle_state_graph_loaded(&mut self) {
-        if self.state_iteration.is_none() {
+        if self.cursor.is_none() {
             let first_root = NodeIndex::new(0);
-            self.state_iteration = Some(StateIteration::new(first_root, &self.g));
+            self.cursor = Some(Cursor::new(first_root, &self.g));
             self.select_node(first_root)
         } else {
-            self.state_iteration
+            self.cursor
                 .as_mut()
                 .unwrap()
                 .add(self.selected_node.unwrap(), &self.g);
@@ -246,12 +245,12 @@ impl App {
         let n = self.g.node_weight_mut(idx).unwrap();
         n.set_selected(true);
 
-        self.state_iteration.as_mut().unwrap().set_cursor(idx);
+        self.cursor.as_mut().unwrap().set(idx);
         self.selected_node = Some(idx);
     }
 
     fn select_next_article(&mut self) {
-        let state_iteration = self.state_iteration.as_mut().unwrap();
+        let state_iteration = self.cursor.as_mut().unwrap();
         let mut next = state_iteration.next();
         loop {
             if self
@@ -274,7 +273,7 @@ impl App {
     }
 
     fn select_prev_article(&mut self) {
-        let state_iteration = self.state_iteration.as_mut().unwrap();
+        let state_iteration = self.cursor.as_mut().unwrap();
         let mut prev = state_iteration.prev();
         loop {
             if self
@@ -485,7 +484,7 @@ fn add_edge(
 
 fn construct_simulation() -> Simulation<(), f32> {
     // create force graph
-    let mut force_graph = ForceGraph::default();
+    let force_graph = ForceGraph::default();
 
     // initialize simulation
     let mut params = SimulationParameters::default();
@@ -495,7 +494,7 @@ fn construct_simulation() -> Simulation<(), f32> {
     Simulation::from_graph(force_graph, params)
 }
 
-fn update_simulation(g: &Graph<node::Node, (), Directed>, sim: &mut Simulation<(), f32>) {
+fn update_simulation(sim: &mut Simulation<(), f32>) {
     // the following manipulations is a hack to avoid having looped edges in the simulation
     // because they cause the simulation to blow up;
     // this is the issue of the fdg_sim engine we use for the simulation

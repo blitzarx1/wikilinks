@@ -4,20 +4,20 @@ use petgraph::{stable_graph::NodeIndex, Directed};
 
 use crate::node::Node;
 
-pub type Cursor = (NodeIndex, NodeIndex);
+pub type Position = (NodeIndex, NodeIndex);
 
 #[derive(Default)]
-pub struct StateIteration {
+pub struct Cursor {
     /// all the roots and their children ranges in NodeIndex space
     roots_ranges: HashMap<NodeIndex, [NodeIndex; 2]>,
     /// all the roots and their hierarchy
     roots_tree: petgraph::Graph<NodeIndex, (), Directed>,
     /// current root index in the root graph
     /// and current element index in the root's range
-    cursor: Option<Cursor>,
+    position: Option<Position>,
 }
 
-impl StateIteration {
+impl Cursor {
     pub fn new(root: NodeIndex, g: &Graph<Node, (), Directed>) -> Self {
         let mut roots_ranges = HashMap::new();
 
@@ -30,7 +30,7 @@ impl StateIteration {
         Self {
             roots_ranges,
             roots_tree: roots,
-            cursor: Some((root, first)),
+            position: Some((root, first)),
         }
     }
 
@@ -47,22 +47,22 @@ impl StateIteration {
         let parent_idx = self
             .roots_tree
             .node_indices()
-            .find(|i| self.cursor.unwrap().0 == *self.roots_tree.node_weight(*i).unwrap())
+            .find(|i| self.position.unwrap().0 == *self.roots_tree.node_weight(*i).unwrap())
             .unwrap();
         self.roots_tree.add_edge(parent_idx, root_idx, ());
 
-        self.cursor = Some((root, self.roots_ranges[&root][0]));
+        self.position = Some((root, self.roots_ranges[&root][0]));
     }
 
-    pub fn set_cursor(&mut self, curr: NodeIndex) {
-        self.cursor = Some((self.root(curr).unwrap(), curr));
+    pub fn set(&mut self, curr: NodeIndex) {
+        self.position = Some((self.root(curr).unwrap(), curr));
     }
 
-    /// Gets the next element relative to the cursor.
+    /// Gets the next element relative to the cursor position.
     ///
     /// If cursor element is the last one in the range, then it returns the first element in the range.
     pub fn next(&mut self) -> NodeIndex {
-        let (root, idx) = self.cursor.unwrap();
+        let (root, idx) = self.position.unwrap();
         let range = self.roots_ranges.get(&root).unwrap();
 
         let next = match idx == range[1] {
@@ -70,15 +70,15 @@ impl StateIteration {
             false => NodeIndex::new(idx.index() + 1),
         };
 
-        self.cursor.as_mut().unwrap().1 = next;
+        self.position.as_mut().unwrap().1 = next;
         next
     }
 
-    /// Gets the previous element relative to the cursor.
+    /// Gets the previous element relative to the cursor position.
     ///
     /// If current element is the first one in the range, then it returns the last element in the range.
     pub fn prev(&mut self) -> NodeIndex {
-        let (root, idx) = self.cursor.unwrap();
+        let (root, idx) = self.position.unwrap();
         let range = self.roots_ranges.get(&root).unwrap();
 
         let new_idx = match idx.index() == 0 || idx == range[0] {
@@ -86,7 +86,7 @@ impl StateIteration {
             false => NodeIndex::new(idx.index() - 1),
         };
 
-        self.cursor.as_mut().unwrap().1 = new_idx;
+        self.position.as_mut().unwrap().1 = new_idx;
         new_idx
     }
 

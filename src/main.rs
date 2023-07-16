@@ -4,7 +4,7 @@ use egui::Context;
 const APP_NAME: &str = "Wiki Links";
 
 mod app;
-mod iteration;
+mod cursor;
 mod node;
 mod state;
 mod url;
