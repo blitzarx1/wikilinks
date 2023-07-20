@@ -1,6 +1,10 @@
 use egui::epaint::ahash::{HashMap, HashMapExt};
 use egui_graphs::Graph;
-use petgraph::{stable_graph::NodeIndex, Directed};
+use petgraph::{
+    stable_graph::NodeIndex,
+    Directed,
+    Direction::{Incoming, Outgoing},
+};
 
 use crate::node::Node;
 
@@ -14,7 +18,7 @@ pub struct Cursor {
     roots_tree: petgraph::Graph<NodeIndex, (), Directed>,
     /// current root index in the root graph
     /// and current element index in the root's range
-    position: Option<Position>,
+    position_by_root: Option<Position>,
 }
 
 impl Cursor {
@@ -30,7 +34,7 @@ impl Cursor {
         Self {
             roots_ranges,
             roots_tree: roots,
-            position: Some((root, first)),
+            position_by_root: Some((root, first)),
         }
     }
 
@@ -47,90 +51,104 @@ impl Cursor {
         let parent_idx = self
             .roots_tree
             .node_indices()
-            .find(|i| self.position.unwrap().0 == *self.roots_tree.node_weight(*i).unwrap())
+            .find(|i| self.position_by_root.unwrap().0 == *self.roots_tree.node_weight(*i).unwrap())
             .unwrap();
         self.roots_tree.add_edge(parent_idx, root_idx, ());
 
-        self.position = Some((root, self.roots_ranges[&root][0]));
+        self.position_by_root = Some((root, self.roots_ranges[&root][0]));
     }
 
-    pub fn set(&mut self, curr: NodeIndex) {
-        self.position = Some((self.root(curr).unwrap(), curr));
+    pub fn set_child(&mut self, idx: NodeIndex) -> Option<NodeIndex> {
+        let found_root = self.root(idx)?;
+        self.position_by_root = Some((found_root, idx));
+        Some(idx)
+    }
+
+    pub fn set_root(&mut self, idx: NodeIndex) -> Option<NodeIndex> {
+        let found_root = self.root(idx)?;
+        self.position_by_root = Some((found_root, self.roots_ranges[&idx][0]));
+        Some(idx)
     }
 
     /// Gets the next element relative to the cursor position.
     ///
     /// If cursor element is the last one in the range, then it returns the first element in the range.
-    pub fn next(&mut self) -> NodeIndex {
-        let (root, idx) = self.position.unwrap();
-        let range = self.roots_ranges.get(&root).unwrap();
+    pub fn next_child(&self) -> NodeIndex {
+        let (root, idx) = self.position_by_root.unwrap();
+        let range = self.roots_ranges[&root];
 
-        let next = match idx == range[1] {
+        match idx == range[1] {
             true => range[0],
             false => NodeIndex::new(idx.index() + 1),
-        };
-
-        self.position.as_mut().unwrap().1 = next;
-        next
+        }
     }
 
     /// Gets the previous element relative to the cursor position.
     ///
     /// If current element is the first one in the range, then it returns the last element in the range.
-    pub fn prev(&mut self) -> NodeIndex {
-        let (root, idx) = self.position.unwrap();
-        let range = self.roots_ranges.get(&root).unwrap();
+    pub fn prev_child(&self) -> NodeIndex {
+        let (root, idx) = self.position_by_root.unwrap();
+        let range = self.roots_ranges[&root];
 
-        let new_idx = match idx.index() == 0 || idx == range[0] {
+        match idx.index() == 0 || idx == range[0] {
             true => range[1],
             false => NodeIndex::new(idx.index() - 1),
-        };
-
-        self.position.as_mut().unwrap().1 = new_idx;
-        new_idx
+        }
     }
 
-    // /// Gets next root index from the root tree. If current root is the last one in the root tree,
-    // /// it returns the first one.
-    // pub fn next_root(&self) -> NodeIndex {
-    //     let root = self.current.unwrap().0;
-    //     let root_idx = self
-    //         .roots_tree
-    //         .node_indices()
-    //         .find(|i| root == *i)
-    //         .unwrap();
+    /// Gets next root index from the root tree. If current root is the last one in the root tree,
+    /// it returns the first one.
+    pub fn next_root(&self) -> NodeIndex {
+        let curr = self.position_by_root.unwrap().0;
+        let curr_rt_idx = self
+            .roots_tree
+            .node_indices()
+            .find(|i| curr == *self.roots_tree.node_weight(*i).unwrap())
+            .unwrap();
 
-    //     let Some(next_root_idx) = self.roots_tree.neighbors(root_idx).next() {
+        match self
+            .roots_tree
+            .neighbors_directed(curr_rt_idx, Outgoing)
+            .next()
+        {
+            Some(next_rt_idx) => *self.roots_tree.node_weight(next_rt_idx).unwrap(),
+            None => *self.roots_tree.node_weight(NodeIndex::new(0)).unwrap(),
+        }
+    }
 
-    //     };
+    /// Gets prev root index from the root graph. If current root is the first one in the root graph,
+    /// it returns the last one.
+    pub fn prev_root(&self) -> NodeIndex {
+        let curr = self.position_by_root.unwrap().0;
+        let curr_rt_idx = self
+            .roots_tree
+            .node_indices()
+            .find(|i| curr == *self.roots_tree.node_weight(*i).unwrap())
+            .unwrap();
 
-    //     *self.roots_tree.node_weight(next_root_idx).unwrap()
-    // }
+        match self
+            .roots_tree
+            .neighbors_directed(curr_rt_idx, Incoming)
+            .next()
+        {
+            Some(next_rt_idx) => *self.roots_tree.node_weight(next_rt_idx).unwrap(),
+            None => self.root(self.last().unwrap()).unwrap(),
+        }
+    }
 
-    // /// Gets prev root index from the root graph. If current root is the first one in the root graph,
-    // /// it returns the last one.
-    // pub fn prev_root(&self) -> NodeIndex {
-    //     let root = self.current.unwrap().0;
-    //     let root_idx = self
-    //         .roots_tree
-    //         .node_indices()
-    //         .find(|i| root == *i)
-    //         .unwrap();
+    /// Gets root for the provided NodeIndex.
+    ///
+    /// If the provided NodeIndex is a root itself then it returns the NodeIndex.
+    pub fn root(&self, idx: NodeIndex) -> Option<NodeIndex> {
+        if self.roots_ranges.keys().any(|root| *root == idx) {
+            return Some(idx);
+        }
 
-    //     let Some(prev_root_idx) = self.roots_tree.neighbors(root_idx).next() {
-
-    //     };
-
-    //     *self.roots_tree.node_weight(prev_root_idx).unwrap()
-    // }
-
-    /// Gets root for the provided index from range
-    fn root(&self, idx: NodeIndex) -> Option<NodeIndex> {
         Some(
             *self
                 .roots_ranges
                 .iter()
-                .find(|(_, range)| range[0] <= idx && idx <= range[1])?
+                .find(|(_, r)| r[0] <= idx && idx <= r[1])?
                 .0,
         )
     }

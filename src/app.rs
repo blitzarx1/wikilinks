@@ -244,18 +244,17 @@ impl App {
 
         let n = self.g.node_weight_mut(idx).unwrap();
         n.set_selected(true);
-
-        self.cursor.as_mut().unwrap().set(idx);
         self.selected_node = Some(idx);
     }
 
     fn select_next_article(&mut self) {
-        let state_iteration = self.cursor.as_mut().unwrap();
-        let mut next = state_iteration.next();
+        let cursor = self.cursor.as_mut().unwrap();
+        let mut next = || cursor.set_child(cursor.next_child()).unwrap();
+        let mut n = next();
         loop {
             if self
                 .g
-                .node_weight(next)
+                .node_weight(n)
                 .unwrap()
                 .data()
                 .unwrap()
@@ -266,19 +265,21 @@ impl App {
                 break;
             }
 
-            next = state_iteration.next();
+            n = next();
         }
 
-        self.select_node(next);
+        self.select_node(n);
     }
 
     fn select_prev_article(&mut self) {
-        let state_iteration = self.cursor.as_mut().unwrap();
-        let mut prev = state_iteration.prev();
+        let cursor = self.cursor.as_mut().unwrap();
+        let mut prev = || cursor.set_child(cursor.prev_child()).unwrap();
+
+        let mut p = prev();
         loop {
             if self
                 .g
-                .node_weight(prev)
+                .node_weight(p)
                 .unwrap()
                 .data()
                 .unwrap()
@@ -289,10 +290,10 @@ impl App {
                 break;
             }
 
-            prev = state_iteration.prev();
+            p = prev();
         }
 
-        self.select_node(prev);
+        self.select_node(p);
     }
 
     fn handle_keys_graph(&mut self, i: &InputState) {
@@ -301,6 +302,12 @@ impl App {
         }
         if i.key_pressed(egui::Key::ArrowRight) {
             self.select_next_article();
+        }
+        if i.key_pressed(egui::Key::ArrowDown) {
+            self.select_next_root();
+        }
+        if i.key_pressed(egui::Key::ArrowUp) {
+            self.select_prev_root();
         }
         if i.key_pressed(egui::Key::Enter) {
             if let Some(idx) = self.selected_node {
@@ -428,12 +435,32 @@ impl App {
     }
 
     fn generate_toolbox_state(&mut self, ui: &Ui, loading: bool) -> toolbox::State {
+        let mut selected_node_root = None;
+        if let Some(selected_node) = self.selected_node {
+            selected_node_root = self.cursor.as_mut().unwrap().root(selected_node);
+        }
+
         toolbox::State {
             loading,
+            selected_node_root,
             spacing: ui.available_height() / 30.,
             selected_node: self.selected_node,
             g: &self.g,
         }
+    }
+
+    fn select_next_root(&mut self) {
+        let cursor = self.cursor.as_mut().unwrap();
+        let next = cursor.next_root();
+        self.cursor.as_mut().unwrap().set_root(next).unwrap();
+        self.select_node(next);
+    }
+
+    fn select_prev_root(&mut self) {
+        let cursor = self.cursor.as_mut().unwrap();
+        let prev = cursor.prev_root();
+        self.cursor.as_mut().unwrap().set_root(prev).unwrap();
+        self.select_node(prev);
     }
 }
 

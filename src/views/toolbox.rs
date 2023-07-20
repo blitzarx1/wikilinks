@@ -14,6 +14,7 @@ pub struct State<'a> {
     pub spacing: f32,
     pub g: &'a Graph<Node, (), Directed>,
     pub selected_node: Option<NodeIndex>,
+    pub selected_node_root: Option<NodeIndex>,
 }
 
 /// Draws toolbox view and returns response from `get links` button if it was displayed.
@@ -55,7 +56,8 @@ pub fn draw_selected_node(ui: &mut Ui, state: &State) -> Option<Response> {
     let node = state.g.node_weight(selected_idx).unwrap().data().unwrap();
 
     ui.label(format!(
-        "{}: {:?}",
+        "{}->{}: {:?}",
+        state.selected_node_root.unwrap().index(),
         selected_idx.index(),
         node.url().url_type()
     ));
