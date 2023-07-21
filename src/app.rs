@@ -123,7 +123,7 @@ impl App {
             self.cursor
                 .as_mut()
                 .unwrap()
-                .add(self.selected_node.unwrap(), &self.g);
+                .update(self.selected_node.unwrap(), &self.g);
         }
 
         self.state = next(&self.state, Fork::Success)
@@ -249,7 +249,7 @@ impl App {
 
     fn select_next_article(&mut self) {
         let cursor = self.cursor.as_mut().unwrap();
-        let mut next = || cursor.set_child(cursor.next_child()).unwrap();
+        let mut next = || cursor.next_child();
         let mut n = next();
         loop {
             if self
@@ -273,7 +273,7 @@ impl App {
 
     fn select_prev_article(&mut self) {
         let cursor = self.cursor.as_mut().unwrap();
-        let mut prev = || cursor.set_child(cursor.prev_child()).unwrap();
+        let mut prev = || cursor.prev_child();
 
         let mut p = prev();
         loop {
@@ -437,7 +437,7 @@ impl App {
     fn generate_toolbox_state(&mut self, ui: &Ui, loading: bool) -> toolbox::State {
         let mut selected_node_root = None;
         if let Some(selected_node) = self.selected_node {
-            selected_node_root = self.cursor.as_mut().unwrap().root(selected_node);
+            selected_node_root = self.cursor.as_mut().unwrap().sticky_root(selected_node);
         }
 
         toolbox::State {
@@ -451,16 +451,22 @@ impl App {
 
     fn select_next_root(&mut self) {
         let cursor = self.cursor.as_mut().unwrap();
-        let next = cursor.next_root();
-        self.cursor.as_mut().unwrap().set_root(next).unwrap();
-        self.select_node(next);
+        let curr_root = cursor.position().0;
+        if let Some(next) = cursor.next_root() {
+            self.select_node(next);
+        } else {
+            self.select_node(curr_root);
+        }
     }
 
     fn select_prev_root(&mut self) {
         let cursor = self.cursor.as_mut().unwrap();
-        let prev = cursor.prev_root();
-        self.cursor.as_mut().unwrap().set_root(prev).unwrap();
-        self.select_node(prev);
+        let curr_root = cursor.position().0;
+        if let Some(prev) = cursor.prev_root() {
+            self.select_node(prev);
+        } else {
+            self.select_node(curr_root);
+        }
     }
 }
 

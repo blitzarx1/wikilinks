@@ -1,4 +1,5 @@
-use egui::epaint::ahash::{HashMap, HashMapExt};
+use std::collections::{HashMap, HashSet};
+
 use egui_graphs::Graph;
 use petgraph::{
     stable_graph::NodeIndex,
@@ -12,149 +13,199 @@ pub type Position = (NodeIndex, NodeIndex);
 
 #[derive(Default)]
 pub struct Cursor {
-    /// all the roots and their children ranges in NodeIndex space
-    roots_ranges: HashMap<NodeIndex, [NodeIndex; 2]>,
-    /// all the roots and their hierarchy
+    /// All the roots and their children. Root itself is included in children. Children are sorted.
+    elements_by_root: HashMap<NodeIndex, Vec<NodeIndex>>,
+
+    /// All the elements and their roots. Root can be element itself.
+    roots_by_element: HashMap<NodeIndex, HashSet<NodeIndex>>,
+
+    /// Contains roots relations;
     roots_tree: petgraph::Graph<NodeIndex, (), Directed>,
+
     /// current root index in the root graph
     /// and current element index in the root's range
-    position_by_root: Option<Position>,
+    position: Position,
 }
 
 impl Cursor {
     pub fn new(root: NodeIndex, g: &Graph<Node, (), Directed>) -> Self {
-        let mut roots_ranges = HashMap::new();
-
-        let first = g.node_indices().next().unwrap();
-        let last = g.node_indices().last().unwrap();
-        roots_ranges.insert(root, [first, last]);
+        let mut elements_by_root = HashMap::new();
+        let elements = get_children_unique_inclusive_sorted(root, g);
 
         let mut roots = petgraph::Graph::new();
         roots.add_node(root);
+
+        let roots_by_element = elements
+            .iter()
+            .map(|idx| {
+                let mut val = HashSet::new();
+                val.insert(root);
+                (*idx, val)
+            })
+            .collect::<HashMap<NodeIndex, HashSet<NodeIndex>>>();
+
+        elements_by_root.insert(root, elements);
+
         Self {
-            roots_ranges,
+            elements_by_root,
+            roots_by_element,
             roots_tree: roots,
-            position_by_root: Some((root, first)),
+            position: (root, root),
         }
     }
 
-    /// Adds new root to the root graph and updates the root ranges.
+    pub fn position(&self) -> Position {
+        self.position
+    }
+
+    /// Updates cursor with new roots and elements.
     ///
-    /// Given graph should already contain the root and all his children.
-    pub fn add(&mut self, root: NodeIndex, g: &Graph<Node, (), Directed>) {
-        self.roots_ranges.insert(
-            root,
-            [self.last().unwrap(), g.node_indices().last().unwrap()],
-        );
+    /// Provided graph should already contain the root and all his children.
+    pub fn update(&mut self, root: NodeIndex, g: &Graph<Node, (), Directed>) {
+        let elements = get_children_unique_inclusive_sorted(root, g);
+        elements.iter().for_each(|idx| {
+            if let Some(val) = self.roots_by_element.get_mut(idx) {
+                val.insert(root);
+            } else {
+                let mut val = HashSet::new();
+                val.insert(root);
+                self.roots_by_element.insert(*idx, val);
+            }
+        });
+        self.elements_by_root.insert(root, elements);
 
-        let root_idx = self.roots_tree.add_node(root);
-        let parent_idx = self
-            .roots_tree
-            .node_indices()
-            .find(|i| self.position_by_root.unwrap().0 == *self.roots_tree.node_weight(*i).unwrap())
-            .unwrap();
-        self.roots_tree.add_edge(parent_idx, root_idx, ());
+        self.add_root_to_tree(root);
 
-        self.position_by_root = Some((root, self.roots_ranges[&root][0]));
-    }
-
-    pub fn set_child(&mut self, idx: NodeIndex) -> Option<NodeIndex> {
-        let found_root = self.root(idx)?;
-        self.position_by_root = Some((found_root, idx));
-        Some(idx)
-    }
-
-    pub fn set_root(&mut self, idx: NodeIndex) -> Option<NodeIndex> {
-        let found_root = self.root(idx)?;
-        self.position_by_root = Some((found_root, self.roots_ranges[&idx][0]));
-        Some(idx)
+        self.position = (root, root);
     }
 
     /// Gets the next element relative to the cursor position.
     ///
     /// If cursor element is the last one in the range, then it returns the first element in the range.
-    pub fn next_child(&self) -> NodeIndex {
-        let (root, idx) = self.position_by_root.unwrap();
-        let range = self.roots_ranges[&root];
+    ///
+    /// This call also moves cursor position.
+    pub fn next_child(&mut self) -> NodeIndex {
+        let (root, idx) = self.position;
 
-        match idx == range[1] {
-            true => range[0],
-            false => NodeIndex::new(idx.index() + 1),
-        }
+        let next = match self.elements_by_root[&root]
+            .iter()
+            .skip_while(|el| **el != idx)
+            .skip(1)
+            .next()
+        {
+            Some(item) => *item,
+            None => *self.elements_by_root[&root].first().unwrap(),
+        };
+
+        self.position = (root, next);
+        next
     }
 
     /// Gets the previous element relative to the cursor position.
     ///
     /// If current element is the first one in the range, then it returns the last element in the range.
-    pub fn prev_child(&self) -> NodeIndex {
-        let (root, idx) = self.position_by_root.unwrap();
-        let range = self.roots_ranges[&root];
+    ///
+    /// This call also moves cursor position.
+    pub fn prev_child(&mut self) -> NodeIndex {
+        let (root, idx) = self.position;
+        let prev = match self.elements_by_root[&root]
+            .iter()
+            .rev()
+            .skip_while(|el| **el != idx)
+            .skip(1)
+            .next()
+        {
+            Some(item) => *item,
+            None => *self.elements_by_root[&root].last().unwrap(),
+        };
 
-        match idx.index() == 0 || idx == range[0] {
-            true => range[1],
-            false => NodeIndex::new(idx.index() - 1),
-        }
+        self.position = (root, prev);
+        prev
     }
 
-    /// Gets next root index from the root tree. If current root is the last one in the root tree,
-    /// it returns the first one.
-    pub fn next_root(&self) -> NodeIndex {
-        let curr = self.position_by_root.unwrap().0;
+    /// Gets next root index from the root tree.
+    /// This call also moves cursor position.
+    pub fn next_root(&mut self) -> Option<NodeIndex> {
+        let curr = self.position.0;
         let curr_rt_idx = self
             .roots_tree
             .node_indices()
             .find(|i| curr == *self.roots_tree.node_weight(*i).unwrap())
             .unwrap();
 
-        match self
+        let next_idx = self
             .roots_tree
             .neighbors_directed(curr_rt_idx, Outgoing)
-            .next()
-        {
-            Some(next_rt_idx) => *self.roots_tree.node_weight(next_rt_idx).unwrap(),
-            None => *self.roots_tree.node_weight(NodeIndex::new(0)).unwrap(),
-        }
+            .next()?;
+        let next = *self.roots_tree.node_weight(next_idx).unwrap();
+
+        self.position = (next, *self.elements_by_root[&next].first().unwrap());
+        Some(next)
     }
 
-    /// Gets prev root index from the root graph. If current root is the first one in the root graph,
-    /// it returns the last one.
-    pub fn prev_root(&self) -> NodeIndex {
-        let curr = self.position_by_root.unwrap().0;
+    /// Gets prev root index from the root graph.
+    /// This call also moves cursor position.
+    pub fn prev_root(&mut self) -> Option<NodeIndex> {
+        let curr = self.position.0;
         let curr_rt_idx = self
             .roots_tree
             .node_indices()
             .find(|i| curr == *self.roots_tree.node_weight(*i).unwrap())
             .unwrap();
 
-        match self
+        let next = self
             .roots_tree
             .neighbors_directed(curr_rt_idx, Incoming)
-            .next()
-        {
-            Some(next_rt_idx) => *self.roots_tree.node_weight(next_rt_idx).unwrap(),
-            None => self.root(self.last().unwrap()).unwrap(),
+            .next()?;
+
+        self.position = (next, *self.elements_by_root[&next].first().unwrap());
+        Some(next)
+    }
+
+    /// Gets all the roots for the provided element.
+    pub fn roots(&self, idx: NodeIndex) -> Option<Vec<NodeIndex>> {
+        self.roots_by_element
+            .get(&idx)
+            .map(|r| r.iter().cloned().collect())
+    }
+
+    /// Returns root for a node and in case multiple roots found it picks
+    /// current root or returns the first one
+    pub fn sticky_root(&self, idx: NodeIndex) -> Option<NodeIndex> {
+        let roots = self.roots(idx)?;
+
+        if roots.len() == 1 {
+            return Some(roots[0]);
         }
-    }
 
-    /// Gets root for the provided NodeIndex.
-    ///
-    /// If the provided NodeIndex is a root itself then it returns the NodeIndex.
-    pub fn root(&self, idx: NodeIndex) -> Option<NodeIndex> {
-        if self.roots_ranges.keys().any(|root| *root == idx) {
-            return Some(idx);
+        let (root, _) = self.position;
+
+        if roots.contains(&root) {
+            return Some(root);
         }
 
-        Some(
-            *self
-                .roots_ranges
-                .iter()
-                .find(|(_, r)| r[0] <= idx && idx <= r[1])?
-                .0,
-        )
+        Some(roots[0])
     }
 
-    /// Gets the last element by NodeIndex value from all the registered roots_ranges.
-    fn last(&self) -> Option<NodeIndex> {
-        self.roots_ranges.values().map(|r| *r.last().unwrap()).max()
+    /// Adds root node to the root node tree.
+    fn add_root_to_tree(&mut self, root: NodeIndex) {
+        let root_idx = self.roots_tree.add_node(root);
+        let parent_idx = self
+            .roots_tree
+            .node_indices()
+            .find(|i| self.position.0 == *self.roots_tree.node_weight(*i).unwrap())
+            .unwrap();
+        self.roots_tree.add_edge(parent_idx, root_idx, ());
     }
+}
+
+fn get_children_unique_inclusive_sorted(
+    root: NodeIndex,
+    g: &Graph<Node, (), Directed>,
+) -> Vec<NodeIndex> {
+    let mut children = g.neighbors_directed(root, Outgoing).collect::<Vec<_>>();
+    children.push(root);
+    children.sort();
+    children.dedup();
+    children
 }
