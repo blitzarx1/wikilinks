@@ -436,8 +436,8 @@ impl App {
 
     fn generate_toolbox_state(&mut self, ui: &Ui, loading: bool) -> toolbox::State {
         let mut selected_node_root = None;
-        if let Some(selected_node) = self.selected_node {
-            selected_node_root = self.cursor.as_mut().unwrap().sticky_root(selected_node);
+        if self.selected_node.is_some() {
+            selected_node_root = Some(self.cursor.as_ref().unwrap().position().0);
         }
 
         toolbox::State {

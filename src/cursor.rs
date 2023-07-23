@@ -153,10 +153,11 @@ impl Cursor {
             .find(|i| curr == *self.roots_tree.node_weight(*i).unwrap())
             .unwrap();
 
-        let next = self
+        let next_idx = self
             .roots_tree
             .neighbors_directed(curr_rt_idx, Incoming)
             .next()?;
+        let next = *self.roots_tree.node_weight(next_idx).unwrap();
 
         self.position = (next, *self.elements_by_root[&next].first().unwrap());
         Some(next)
