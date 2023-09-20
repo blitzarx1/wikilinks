@@ -10,6 +10,7 @@ mod state;
 mod url;
 mod url_retriever;
 mod views;
+mod utils;
 
 pub struct App {
     app: app::App,

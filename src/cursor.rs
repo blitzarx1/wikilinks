@@ -204,7 +204,7 @@ fn get_children_unique_inclusive_sorted(
     root: NodeIndex,
     g: &Graph<Node, (), Directed>,
 ) -> Vec<NodeIndex> {
-    let mut children = g.neighbors_directed(root, Outgoing).collect::<Vec<_>>();
+    let mut children = g.g.neighbors_directed(root, Outgoing).collect::<Vec<_>>();
     children.push(root);
     children.sort();
     children.dedup();

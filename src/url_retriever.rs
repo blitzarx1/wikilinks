@@ -44,7 +44,8 @@ impl UrlRetriever {
         let protocol = format!("{}://", res.url().scheme());
         let host = res.url().host().unwrap().to_string();
 
-        let doc = Html::parse_document(res.text().await?.as_str());
+        let text = res.text().await?;
+        let doc = Html::parse_document(text.as_str());
         let a_selector = Selector::parse("a").unwrap();
 
         doc.select(&a_selector).for_each(|selection| {
@@ -80,7 +81,14 @@ impl UrlRetriever {
             );
         }
 
-        if !href_val_final.starts_with(protocol.as_str()) {
+        if !href_val_final.starts_with(protocol.as_str())
+            || href_val_final.ends_with("ISBN_(identifier)")
+            || href_val_final.ends_with("S2CID_(identifier)")
+            || href_val_final.ends_with("Doi_(identifier)")
+            || href_val_final.ends_with("Bibcode_(identifier)")
+            || href_val_final.ends_with("ArXiv_(identifier)")
+            || href_val_final.ends_with("CiteSeerX_(identifier)")
+        {
             return None;
         }
 
@@ -88,7 +96,7 @@ impl UrlRetriever {
         match url {
             Ok(url) => Some(url),
             Err(err) => {
-                error!("error parsing url: {} -  {}", href_val_final, err);
+                error!("error parsing url: {} - {}", href_val_final, err);
                 None
             }
         }

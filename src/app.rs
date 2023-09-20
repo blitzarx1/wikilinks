@@ -19,7 +19,9 @@ use tokio::task::JoinHandle;
 use crate::cursor::Cursor;
 use crate::views::graph::{self, draw_view_graph};
 use crate::views::input::draw_view_input;
-use crate::views::style::{COLOR_ACCENT, COLOR_LEFT_LOW, COLOR_SUB_ACCENT, CURSOR_WIDTH};
+use crate::views::style::{
+    COLOR_ACCENT, COLOR_LEFT_LOW, COLOR_RIGHT_LOW, COLOR_SUB_ACCENT, CURSOR_WIDTH,
+};
 use crate::views::toolbox::{self, draw_view_toolbox};
 use crate::{
     node,
@@ -66,15 +68,17 @@ impl Default for App {
         let (changes_sender, changes_receiver) = unbounded();
         let sim = construct_simulation();
 
+        let g = Graph::new(StableGraph::new());
+
         App {
             style,
             changes_sender,
             changes_receiver,
             sim,
+            g,
 
             root_article_url: Default::default(),
             state: Default::default(),
-            g: Default::default(),
             active_tasks: Default::default(),
             selected_node: Default::default(),
             node_by_url: Default::default(),
@@ -177,7 +181,7 @@ impl App {
                         Ok(url) => {
                             info!("got new url from the retriver: {}", url.val());
 
-                            let parent_loc = self.g.node_weight(*parent_idx).unwrap().location();
+                            let parent_loc = self.g.g.node_weight(*parent_idx).unwrap().location();
 
                             match self.node_by_url.get(&url) {
                                 Some(idx) => {
@@ -212,6 +216,7 @@ impl App {
             info!(
                 "task finished; received all children urls for: {}",
                 self.g
+                    .g
                     .node_weight(*finished)
                     .unwrap()
                     .data()
@@ -238,13 +243,31 @@ impl App {
 
     fn select_node(&mut self, idx: NodeIndex) {
         if let Some(selected) = self.selected_node {
-            let n = self.g.node_weight_mut(selected).unwrap();
+            let n = self.g.g.node_weight_mut(selected).unwrap();
             n.set_selected(false);
         }
 
-        let n = self.g.node_weight_mut(idx).unwrap();
+        let n = self.g.g.node_weight_mut(idx).unwrap();
         n.set_selected(true);
         self.selected_node = Some(idx);
+    }
+
+    fn select_next(&mut self) -> NodeIndex {
+        let cursor = self.cursor.as_mut().unwrap();
+        let next = cursor.next_child();
+
+        self.select_node(next);
+
+        next
+    }
+
+    fn select_prev(&mut self) -> NodeIndex {
+        let cursor = self.cursor.as_mut().unwrap();
+        let prev = cursor.prev_child();
+
+        self.select_node(prev);
+
+        prev
     }
 
     fn select_next_article(&mut self) {
@@ -253,6 +276,7 @@ impl App {
         let mut n = next();
         loop {
             if self
+                .g
                 .g
                 .node_weight(n)
                 .unwrap()
@@ -279,6 +303,7 @@ impl App {
         loop {
             if self
                 .g
+                .g
                 .node_weight(p)
                 .unwrap()
                 .data()
@@ -297,21 +322,27 @@ impl App {
     }
 
     fn handle_keys_graph(&mut self, i: &InputState) {
+        if i.key_pressed(egui::Key::L) {
+            self.select_next();
+        }
+        if i.key_pressed(egui::Key::H) {
+            self.select_prev();
+        }
         if i.key_pressed(egui::Key::ArrowLeft) {
             self.select_prev_article();
         }
         if i.key_pressed(egui::Key::ArrowRight) {
             self.select_next_article();
         }
-        if i.key_pressed(egui::Key::ArrowDown) {
+        if i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::J) {
             self.select_next_root();
         }
-        if i.key_pressed(egui::Key::ArrowUp) {
+        if i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::K) {
             self.select_prev_root();
         }
         if i.key_pressed(egui::Key::Enter) {
             if let Some(idx) = self.selected_node {
-                let n = self.g.node_weight(idx).unwrap().data().unwrap();
+                let n = self.g.g.node_weight(idx).unwrap().data().unwrap();
 
                 self.create_new_task(idx, n.url().clone());
                 self.state = State::GraphAndLoading;
@@ -376,7 +407,7 @@ impl App {
                 }
 
                 let idx = self.selected_node.unwrap();
-                let n = self.g.node_weight(idx).unwrap().data().unwrap();
+                let n = self.g.g.node_weight(idx).unwrap().data().unwrap();
 
                 self.create_new_task(idx, n.url().clone());
                 self.state = State::GraphAndLoading;
@@ -396,7 +427,7 @@ impl App {
                         return;
                     }
 
-                    self.g = StableGraph::new();
+                    self.g.g = StableGraph::new();
                     let mut rng = rand::thread_rng();
                     let loc = egui::Vec2 {
                         x: rng.gen_range(-100.0..100.),
@@ -484,6 +515,7 @@ fn add_node(
 
     let color = match n.url().url_type() {
         url::Type::Article => Some(COLOR_SUB_ACCENT),
+        url::Type::ExternalArticle => Some(COLOR_RIGHT_LOW),
         url::Type::File => Some(COLOR_LEFT_LOW),
         url::Type::Other => None,
     };
@@ -574,9 +606,9 @@ fn sync_graph_with_simulation(
     g: &mut Graph<node::Node, (), Directed>,
     sim: &mut Simulation<(), f32>,
 ) {
-    let g_indices = g.node_indices().collect::<Vec<_>>();
+    let g_indices = g.g.node_indices().collect::<Vec<_>>();
     g_indices.iter().for_each(|g_n_idx| {
-        let g_n = g.node_weight_mut(*g_n_idx).unwrap();
+        let g_n = g.g.node_weight_mut(*g_n_idx).unwrap();
         let sim_n = sim.get_graph_mut().node_weight_mut(*g_n_idx).unwrap();
 
         if g_n.dragged() {

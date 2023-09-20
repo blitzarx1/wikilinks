@@ -2,7 +2,7 @@ use egui::{Response, ScrollArea, TextEdit, Ui};
 use egui_graphs::Graph;
 use petgraph::{stable_graph::NodeIndex, Directed};
 
-use crate::node::Node;
+use crate::{node::Node, utils};
 
 use super::style::header_accent;
 
@@ -28,8 +28,8 @@ pub fn draw_view_toolbox(ui: &mut Ui, state: &State) -> Option<Response> {
             ui.add_space(state.spacing);
             ui.separator();
 
-            ui.label(format!("urls: {}", state.g.node_count()));
-            ui.label(format!("connections: {}", state.g.edge_count()));
+            ui.label(format!("urls: {}", state.g.g.node_count()));
+            ui.label(format!("connections: {}", state.g.g.edge_count()));
 
             match state.loading {
                 true => {
@@ -53,7 +53,7 @@ pub fn draw_selected_node(ui: &mut Ui, state: &State) -> Option<Response> {
 
     let selected_idx = state.selected_node.unwrap();
 
-    let node = state.g.node_weight(selected_idx).unwrap().data().unwrap();
+    let node = state.g.g.node_weight(selected_idx).unwrap().data().unwrap();
 
     ui.label(format!(
         "{}->{}: {:?}",
@@ -61,19 +61,23 @@ pub fn draw_selected_node(ui: &mut Ui, state: &State) -> Option<Response> {
         selected_idx.index(),
         node.url().url_type()
     ));
-
-    ui.add(
-        TextEdit::singleline(&mut node.label())
-            .cursor_at_end(true)
-            .frame(false),
-    );
+    ScrollArea::horizontal().show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.add(
+                TextEdit::singleline(&mut node.label())
+                    .cursor_at_end(true)
+                    .clip_text(false)
+                    .frame(false),
+            );
+        });
+    });
 
     if ui.button("copy").clicked() {
         todo!()
     };
 
     if ui.button("open").clicked() {
-        open::that(node.url().val()).unwrap();
+        utils::url::open_url(node.url().val());
     };
 
     match node.url().url_type() {

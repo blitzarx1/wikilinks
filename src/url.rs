@@ -13,6 +13,7 @@ pub struct Url {
 pub enum Type {
     Article,
     File,
+    ExternalArticle,
     Other,
 }
 
@@ -40,7 +41,7 @@ impl Url {
                     .last()
                     .unwrap(),
             ),
-            Type::Other => self.val().to_string(),
+            Type::ExternalArticle | Type::Other => self.val().to_string(),
         }
     }
 
@@ -49,6 +50,8 @@ impl Url {
             Type::Article
         } else if self.is_file() {
             Type::File
+        } else if self.is_external_article() {
+            Type::ExternalArticle
         } else {
             Type::Other
         }
@@ -74,5 +77,10 @@ impl Url {
             || s.ends_with(".jpeg")
             || s.ends_with(".gif")
             || s.ends_with(".svg")
+    }
+
+    fn is_external_article(&self) -> bool {
+        let s = self.val.to_string().to_lowercase();
+        s.contains("arxiv.org") || s.contains("doi.org")
     }
 }
