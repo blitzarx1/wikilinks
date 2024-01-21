@@ -53,7 +53,7 @@ pub fn draw_selected_node(ui: &mut Ui, state: &State) -> Option<Response> {
 
     let selected_idx = state.selected_node.unwrap();
 
-    let node = state.g.g.node_weight(selected_idx).unwrap().data().unwrap();
+    let node = state.g.g.node_weight(selected_idx).unwrap().payload();
 
     ui.label(format!(
         "{}->{}: {:?}",

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use egui::{CentralPanel, SidePanel, Vec2};
+use egui::{CentralPanel, Pos2, SidePanel, Vec2};
 use egui::{Context, InputState, Stroke, Style, Ui};
-use egui_graphs::{add_node_custom, Change, ChangeNode, Graph, Node};
+use egui_graphs::events::{Event, PayloadNodeSelect};
+use egui_graphs::{add_node_custom, Graph, Node};
 use fdg_sim::glam::Vec3;
 use fdg_sim::{ForceGraph, Simulation, SimulationParameters};
 use log::error;
@@ -52,8 +53,8 @@ pub struct App {
 
     cursor: Option<Cursor>,
 
-    changes_sender: Sender<Change>,
-    changes_receiver: Receiver<Change>,
+    changes_sender: Sender<Event>,
+    changes_receiver: Receiver<Event>,
 
     node_by_url: HashMap<Url, NodeIndex>,
 }
@@ -61,7 +62,6 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         let mut style = Style::default();
-        style.visuals.text_cursor_width = CURSOR_WIDTH;
         style.visuals.selection.stroke = Stroke::new(1., COLOR_ACCENT);
         style.visuals.selection.bg_fill = COLOR_SUB_ACCENT;
 
@@ -134,16 +134,8 @@ impl App {
     }
 
     fn handle_state_graph(&mut self) {
-        if let Ok(Change::Node(ChangeNode::Selected { id, old: _, new })) =
-            self.changes_receiver.try_recv()
-        {
-            // we don't need to handle deselect as our app just rewrites selection
-            // when needed
-            if !new {
-                return;
-            }
-
-            self.select_node(id);
+        if let Ok(Event::NodeSelect(PayloadNodeSelect { id })) = self.changes_receiver.try_recv() {
+            self.select_node(NodeIndex::new(id));
         }
     }
 
@@ -219,8 +211,7 @@ impl App {
                     .g
                     .node_weight(*finished)
                     .unwrap()
-                    .data()
-                    .unwrap()
+                    .payload()
                     .url()
                     .val()
             );
@@ -275,17 +266,7 @@ impl App {
         let mut next = || cursor.next_child();
         let mut n = next();
         loop {
-            if self
-                .g
-                .g
-                .node_weight(n)
-                .unwrap()
-                .data()
-                .unwrap()
-                .url()
-                .url_type()
-                == url::Type::Article
-            {
+            if self.g.g.node_weight(n).unwrap().payload().url().url_type() == url::Type::Article {
                 break;
             }
 
@@ -301,17 +282,7 @@ impl App {
 
         let mut p = prev();
         loop {
-            if self
-                .g
-                .g
-                .node_weight(p)
-                .unwrap()
-                .data()
-                .unwrap()
-                .url()
-                .url_type()
-                == url::Type::Article
-            {
+            if self.g.g.node_weight(p).unwrap().payload().url().url_type() == url::Type::Article {
                 break;
             }
 
@@ -342,7 +313,7 @@ impl App {
         }
         if i.key_pressed(egui::Key::Enter) {
             if let Some(idx) = self.selected_node {
-                let n = self.g.g.node_weight(idx).unwrap().data().unwrap();
+                let n = self.g.g.node_weight(idx).unwrap().payload();
 
                 self.create_new_task(idx, n.url().clone());
                 self.state = State::GraphAndLoading;
@@ -407,7 +378,7 @@ impl App {
                 }
 
                 let idx = self.selected_node.unwrap();
-                let n = self.g.g.node_weight(idx).unwrap().data().unwrap();
+                let n = self.g.g.node_weight(idx).unwrap().payload();
 
                 self.create_new_task(idx, n.url().clone());
                 self.state = State::GraphAndLoading;
@@ -435,10 +406,10 @@ impl App {
                     };
 
                     let idx: NodeIndex =
-                        add_node_custom(&mut self.g, &node::Node::new(u.clone()), |_, n| {
-                            Node::new(loc, n.clone())
-                                .with_label(n.label())
-                                .with_color(COLOR_ACCENT)
+                        add_node_custom(&mut self.g, &node::Node::new(u.clone()), |idx, n| {
+                            let mut res = Node::new(n.clone()).with_label(n.label());
+                            res.bind(idx, loc.to_pos2());
+                            res
                         });
 
                     self.node_by_url.insert(u.clone(), idx);
@@ -504,7 +475,7 @@ impl App {
 fn add_node(
     g: &mut Graph<node::Node, (), Directed>,
     sim: &mut Simulation<(), f32>,
-    loc_center: Vec2,
+    loc_center: Pos2,
     n: &node::Node,
 ) -> NodeIndex {
     let mut rng = rand::thread_rng();
@@ -520,11 +491,9 @@ fn add_node(
         url::Type::Other => None,
     };
 
-    let idx = add_node_custom(g, n, |_, n| {
-        let mut res = Node::new(loc, n.clone()).with_label(n.label());
-        if let Some(c) = color {
-            res = res.with_color(c);
-        }
+    let idx = add_node_custom(g, n, |idx, n| {
+        let mut res = Node::new(n.clone()).with_label(n.label());
+        res.bind(idx, loc.to_pos2());
         res
     });
 
@@ -618,6 +587,6 @@ fn sync_graph_with_simulation(
         }
 
         let loc = sim_n.location;
-        g_n.set_location(Vec2::new(loc.x, loc.y));
+        g_n.set_location(Pos2::new(loc.x, loc.y));
     });
 }
