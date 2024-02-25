@@ -400,21 +400,18 @@ impl App {
 
                     self.g.g = StableGraph::new();
                     let mut rng = rand::thread_rng();
-                    let loc = egui::Vec2 {
+                    let loc = egui::Pos2 {
                         x: rng.gen_range(-100.0..100.),
                         y: rng.gen_range(-100.0..100.),
                     };
 
-                    let idx: NodeIndex =
-                        add_node_custom(&mut self.g, &node::Node::new(u.clone()), |idx, n| {
-                            let mut res = Node::new(n.clone()).with_label(n.label());
-                            res.bind(idx, loc.to_pos2());
-                            res
-                        });
+                    let n = node::Node::new(u.clone());
+                    let label = n.label();
+                    let idx: NodeIndex = self.g.add_node_with_label_and_location(n, label, loc);
 
                     self.node_by_url.insert(u.clone(), idx);
 
-                    add_node_to_sim(&mut self.sim, idx, loc);
+                    add_node_to_sim(&mut self.sim, idx, loc.to_vec2());
 
                     self.create_new_task(idx, u);
 
@@ -479,7 +476,7 @@ fn add_node(
     n: &node::Node,
 ) -> NodeIndex {
     let mut rng = rand::thread_rng();
-    let loc = egui::Vec2 {
+    let loc = egui::Pos2 {
         x: loc_center.x + rng.gen_range(-100.0..100.),
         y: loc_center.y + rng.gen_range(-100.0..100.),
     };
@@ -491,13 +488,8 @@ fn add_node(
         url::Type::Other => None,
     };
 
-    let idx = add_node_custom(g, n, |idx, n| {
-        let mut res = Node::new(n.clone()).with_label(n.label());
-        res.bind(idx, loc.to_pos2());
-        res
-    });
-
-    add_node_to_sim(sim, idx, loc)
+    let idx = g.add_node_with_label_and_location(n.clone(), n.label(), loc);
+    add_node_to_sim(sim, idx, loc.to_vec2())
 }
 
 fn add_node_to_sim(sim: &mut Simulation<(), f32>, idx: NodeIndex, loc: Vec2) -> NodeIndex {
@@ -512,7 +504,7 @@ fn add_edge(
     start: NodeIndex,
     end: NodeIndex,
 ) {
-    egui_graphs::add_edge(g, start, end, &());
+    g.add_edge(start, end, ());
     sim.get_graph_mut().add_edge(start, end, EDGE_WEIGHT);
 }
 
